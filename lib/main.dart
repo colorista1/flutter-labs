@@ -1,9 +1,221 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:math_expressions/math_expressions.dart';
 
 void main() {
   runApp(CalculatorApp());
+}
+
+class _ExpressionEvaluator {
+  final String _expression;
+  int _position = 0;
+
+  _ExpressionEvaluator(this._expression);
+
+  double evaluate() {
+    _skipWhitespace();
+    final value = _parseExpression();
+    _skipWhitespace();
+    if (_position != _expression.length) {
+      throw const FormatException('Unexpected token');
+    }
+    return value;
+  }
+
+  double _parseExpression() {
+    double value = _parseTerm();
+
+    while (true) {
+      _skipWhitespace();
+      if (_position >= _expression.length) {
+        break;
+      }
+
+      final ch = _expression[_position];
+      if (ch == '+') {
+        _position++;
+        value += _parseTerm();
+      } else if (ch == '-') {
+        _position++;
+        value -= _parseTerm();
+      } else {
+        break;
+      }
+    }
+
+    return value;
+  }
+
+  double _parseTerm() {
+    double value = _parsePower();
+
+    while (true) {
+      _skipWhitespace();
+      if (_position >= _expression.length) {
+        break;
+      }
+
+      final ch = _expression[_position];
+      if (ch == '*') {
+        _position++;
+        value *= _parsePower();
+      } else if (ch == '/') {
+        _position++;
+        final divisor = _parsePower();
+        if (divisor == 0) {
+          throw const FormatException('Division by zero');
+        }
+        value /= divisor;
+      } else {
+        break;
+      }
+    }
+
+    return value;
+  }
+
+  double _parsePower() {
+    double value = _parseUnary();
+    _skipWhitespace();
+
+    if (_position < _expression.length && _expression[_position] == '^') {
+      _position++;
+      final exponent = _parsePower();
+      value = math.pow(value, exponent).toDouble();
+    }
+
+    return value;
+  }
+
+  double _parseUnary() {
+    _skipWhitespace();
+
+    if (_position < _expression.length && _expression[_position] == '-') {
+      _position++;
+      return -_parseUnary();
+    }
+
+    double value = _parsePrimary();
+
+    while (true) {
+      _skipWhitespace();
+      if (_position < _expression.length && _expression[_position] == '!') {
+        _position++;
+        value = _factorial(value);
+      } else {
+        break;
+      }
+    }
+
+    return value;
+  }
+
+  double _parsePrimary() {
+    _skipWhitespace();
+
+    if (_position >= _expression.length) {
+      throw const FormatException('Unexpected end of expression');
+    }
+
+    final ch = _expression[_position];
+
+    if (ch == '(') {
+      _position++;
+      final value = _parseExpression();
+      _skipWhitespace();
+      if (_position >= _expression.length || _expression[_position] != ')') {
+        throw const FormatException('Missing closing parenthesis');
+      }
+      _position++;
+      return value;
+    }
+
+    if (_expression.startsWith('sqrt', _position)) {
+      _position += 4;
+      _skipWhitespace();
+      if (_position >= _expression.length || _expression[_position] != '(') {
+        throw const FormatException('Missing opening parenthesis for sqrt');
+      }
+      _position++;
+      final value = _parseExpression();
+      _skipWhitespace();
+      if (_position >= _expression.length || _expression[_position] != ')') {
+        throw const FormatException('Missing closing parenthesis for sqrt');
+      }
+      _position++;
+      return math.sqrt(value);
+    }
+
+    if (_isDigit(ch) || ch == '.') {
+      return _parseNumber();
+    }
+
+    throw FormatException('Unexpected token: $ch');
+  }
+
+  double _parseNumber() {
+    final start = _position;
+    bool hasDot = false;
+    String buffer = '';
+
+    while (_position < _expression.length) {
+      final ch = _expression[_position];
+      if (ch == '.') {
+        if (hasDot) {
+          break;
+        }
+        hasDot = true;
+        buffer += ch;
+        _position++;
+        continue;
+      }
+
+      if (ch.codeUnitAt(0) >= 48 && ch.codeUnitAt(0) <= 57) {
+        buffer += ch;
+        _position++;
+        continue;
+      }
+
+      break;
+    }
+
+    if (buffer.isEmpty || buffer == '.') {
+      _position = start;
+      throw const FormatException('Invalid number');
+    }
+
+    return double.parse(buffer);
+  }
+
+  double _factorial(double value) {
+    if (value.isNaN || value.isInfinite) {
+      throw const FormatException('Factorial is only defined for finite numbers');
+    }
+
+    if (value < 0 || value != value.roundToDouble()) {
+      throw const FormatException(
+          'Factorial is only defined for non-negative integers');
+    }
+
+    final int limit = value.toInt();
+    double result = 1;
+    for (int i = 2; i <= limit; i++) {
+      result *= i;
+    }
+    return result;
+  }
+
+  void _skipWhitespace() {
+    while (_position < _expression.length &&
+        _expression[_position] == ' ') {
+      _position++;
+    }
+  }
+
+  bool _isDigit(String ch) {
+    return ch.codeUnitAt(0) >= 48 && ch.codeUnitAt(0) <= 57;
+  }
 }
 
 class CalculatorApp extends StatelessWidget {
@@ -48,49 +260,62 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       final key = event.logicalKey;
-      
+
       // Обработка цифр
-      if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
+      if (key == LogicalKeyboardKey.digit0 ||
+          key == LogicalKeyboardKey.numpad0) {
         _appendToExpression('0');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
+      } else if (key == LogicalKeyboardKey.digit1 ||
+          key == LogicalKeyboardKey.numpad1) {
         _appendToExpression('1');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) {
+      } else if (key == LogicalKeyboardKey.digit2 ||
+          key == LogicalKeyboardKey.numpad2) {
         _appendToExpression('2');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) {
+      } else if (key == LogicalKeyboardKey.digit3 ||
+          key == LogicalKeyboardKey.numpad3) {
         _appendToExpression('3');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) {
+      } else if (key == LogicalKeyboardKey.digit4 ||
+          key == LogicalKeyboardKey.numpad4) {
         _appendToExpression('4');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5) {
+      } else if (key == LogicalKeyboardKey.digit5 ||
+          key == LogicalKeyboardKey.numpad5) {
         _appendToExpression('5');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit6 || key == LogicalKeyboardKey.numpad6) {
+      } else if (key == LogicalKeyboardKey.digit6 ||
+          key == LogicalKeyboardKey.numpad6) {
         _appendToExpression('6');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit7 || key == LogicalKeyboardKey.numpad7) {
+      } else if (key == LogicalKeyboardKey.digit7 ||
+          key == LogicalKeyboardKey.numpad7) {
         _appendToExpression('7');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit8 || key == LogicalKeyboardKey.numpad8) {
+      } else if (key == LogicalKeyboardKey.digit8 ||
+          key == LogicalKeyboardKey.numpad8) {
         _appendToExpression('8');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.digit9 || key == LogicalKeyboardKey.numpad9) {
+      } else if (key == LogicalKeyboardKey.digit9 ||
+          key == LogicalKeyboardKey.numpad9) {
         _appendToExpression('9');
         return KeyEventResult.handled;
       }
       // Обработка операторов
-      else if (key == LogicalKeyboardKey.add || key == LogicalKeyboardKey.numpadAdd) {
+      else if (key == LogicalKeyboardKey.add ||
+          key == LogicalKeyboardKey.numpadAdd) {
         _appendToExpression('+');
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.minus || key == LogicalKeyboardKey.numpadSubtract) {
+      } else if (key == LogicalKeyboardKey.minus ||
+          key == LogicalKeyboardKey.numpadSubtract) {
         _appendToExpression('-');
         return KeyEventResult.handled;
       }
       // Обработка точки
-      else if (key == LogicalKeyboardKey.period || key == LogicalKeyboardKey.numpadDecimal) {
+      else if (key == LogicalKeyboardKey.period ||
+          key == LogicalKeyboardKey.numpadDecimal) {
         _appendToExpression('.');
         return KeyEventResult.handled;
       }
@@ -103,22 +328,45 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         return KeyEventResult.handled;
       }
       // Обработка специальных клавиш
-      else if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter || 
-               key == LogicalKeyboardKey.equal) {
+      else if (key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter ||
+          key == LogicalKeyboardKey.equal) {
         _calculateResult();
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.backspace || key == LogicalKeyboardKey.delete) {
+      } else if (key == LogicalKeyboardKey.backspace ||
+          key == LogicalKeyboardKey.delete) {
         _deleteSymbol();
         return KeyEventResult.handled;
-      } else if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.clear) {
+      } else if (key == LogicalKeyboardKey.escape ||
+          key == LogicalKeyboardKey.clear) {
         _clearExpression();
         return KeyEventResult.handled;
       }
-      // Обработка символов напрямую (для операторов *, /, ^ и других случаев)
+      // Обработка символов напрямую (для операторов *, /, ^, ! и других случаев)
       else if (event.character != null) {
         final char = event.character!;
-        if (['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 
-             '+', '-', '*', '/', '^', '.', '(', ')', '='].contains(char)) {
+        if ([
+          '0',
+          '1',
+          '2',
+          '3',
+          '4',
+          '5',
+          '6',
+          '7',
+          '8',
+          '9',
+          '+',
+          '-',
+          '*',
+          '/',
+          '^',
+          '!',
+          '.',
+          '(',
+          ')',
+          '='
+        ].contains(char)) {
           if (char == '=') {
             _calculateResult();
           } else {
@@ -143,7 +391,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         depth++;
       } else if (ch == ')') {
         depth--;
-      } else if (depth == 0 && (ch == '+' || ch == '-' || ch == '*' || ch == '/')) {
+      } else if (depth == 0 &&
+          (ch == '+' || ch == '-' || ch == '*' || ch == '/')) {
         // If the first top-level operator is not division, we're fine
         if (ch != '/') return false;
 
@@ -178,80 +427,26 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   String eval(String result) {
     try {
-      final parser = Parser();
-      final normalizedExpression = result.replaceAll('√', 'sqrt');
-      final expression = parser.parse(normalizedExpression);
-      final context = ContextModel();
+      final normalizedExpression = result.replaceAll('√', 'sqrt').replaceAll(' ', '');
+      final evaluatedResult = _ExpressionEvaluator(normalizedExpression).evaluate();
 
-      try {
-        double evaluatedResult = expression.evaluate(EvaluationType.REAL, context);
-        
-        // Округляем результат до 10 знаков после запятой, чтобы убрать ошибки округления
-        // Например, 0.600000000001 станет 0.6000000000, а затем мы удалим лишние нули
-        evaluatedResult = double.parse(evaluatedResult.toStringAsFixed(10));
-        
-        // Проверяем, есть ли в исходном выражении точка (десятичное число)
-        final hasDecimalPoint = result.contains('.');
-        
-        // Если есть точка в исходном выражении, всегда показываем результат с десятичной частью
-        if (hasDecimalPoint) {
-          // Используем toStringAsFixed для избежания ошибок округления, затем удалим лишние нули
-          String resultStr = evaluatedResult.toStringAsFixed(10);
-          // Если результат целый, но в исходном выражении была точка, добавляем .0
-          if (!resultStr.contains('.')) {
-            return resultStr + '.0';
-          }
-          // Убираем завершающие нули после точки, но оставляем .0 если результат целый
-          if (evaluatedResult % 1 == 0) {
-            return evaluatedResult.toInt().toString() + '.0';
-          }
-          // Убираем завершающие нули только после десятичной точки
-          if (resultStr.contains('.')) {
-            // Разделяем на целую и дробную части
-            final parts = resultStr.split('.');
-            if (parts.length == 2) {
-              // Удаляем завершающие нули из дробной части
-              String fractionalPart = parts[1].replaceAll(RegExp(r'0+$'), '');
-              // Если дробная часть стала пустой, возвращаем только целую часть
-              if (fractionalPart.isEmpty) {
-                return parts[0];
-              }
-              // Иначе возвращаем целую часть и дробную часть без завершающих нулей
-              return '${parts[0]}.$fractionalPart';
-            }
-          }
-          return resultStr;
+      String formattedResult = evaluatedResult.toStringAsFixed(10);
+      if (formattedResult.contains('.')) {
+        final parts = formattedResult.split('.');
+        final fractionalPart = parts[1].replaceAll(RegExp(r'0+$'), '');
+        if (fractionalPart.isEmpty) {
+          formattedResult = parts[0];
         } else {
-          // Если нет точки в исходном выражении
-          // Если результат десятичный, показываем его с десятичной частью
-          if (evaluatedResult % 1 != 0) {
-            // Используем toStringAsFixed для избежания ошибок округления, затем удалим лишние нули
-            String resultStr = evaluatedResult.toStringAsFixed(10);
-            // Убираем завершающие нули только после десятичной точки
-            if (resultStr.contains('.')) {
-              // Разделяем на целую и дробную части
-              final parts = resultStr.split('.');
-              if (parts.length == 2) {
-                // Удаляем завершающие нули из дробной части
-                String fractionalPart = parts[1].replaceAll(RegExp(r'0+$'), '');
-                // Если дробная часть стала пустой, возвращаем только целую часть
-                if (fractionalPart.isEmpty) {
-                  return parts[0];
-                }
-                // Иначе возвращаем целую часть и дробную часть без завершающих нулей
-                return '${parts[0]}.$fractionalPart';
-              }
-            }
-            return resultStr;
-          } else {
-            // Если результат целый, возвращаем целое число
-            final intValue = evaluatedResult.toInt();
-            return intValue.toString();
-          }
+          formattedResult = '${parts[0]}.$fractionalPart';
         }
-      } catch (e) {
-        return expression.evaluate(EvaluationType.REAL, context).toString();
       }
+
+      final hasDecimalPoint = result.contains('.');
+      if (hasDecimalPoint && !formattedResult.contains('.')) {
+        return '$formattedResult.0';
+      }
+
+      return formattedResult;
     } catch (e) {
       return result;
     }
@@ -278,68 +473,99 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   bool _isValidInput(String value) {
-    // Check if input is a digit, dot, or one of the operators (+, -, *, /, ^) or parentheses (, )
-    final validCharacters = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '+', '-', '*', '/', '^', '(', ')', '√'];
+    final validCharacters = [
+      '0',
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '.',
+      '+',
+      '-',
+      '*',
+      '/',
+      '^',
+      '!',
+      '(',
+      ')',
+      '√'
+    ];
 
-    // Check if the input is an operator and the last character in the expression is also an operator
+    if (_result.isNotEmpty &&
+        value == '!' &&
+        !RegExp(r'[0-9)]').hasMatch(_result[_result.length - 1])) {
+      return false;
+    }
+
     if (_result.isNotEmpty &&
         ['+', '-', '*', '/', '^'].contains(value) &&
         ['+', '-', '*', '/', '^'].contains(_result[_result.length - 1])) {
-      // Replace the last operator with the new operator
       _result = _result.replaceRange(_result.length - 1, _result.length, value);
       _result = _result.substring(0, _result.length - 1);
       return true;
     }
 
-    // Check if the input is a dot and the current number already contains a dot
-    if (value == '.' && _result.isNotEmpty && _result.split(RegExp(r'[+\-*/^]')).last.contains('.')) {
+    if (value == '.' &&
+        _result.isNotEmpty &&
+        _result.split(RegExp(r'[+\-*/^()]')).last.contains('.')) {
       return false;
     }
 
-    // Check if the first character is an operator, dot, or right parenthesis
-    if (_result.isEmpty && (value == '.' || ['+', '*', '/', '^', ')'].contains(value))) {
+    if (_result.isEmpty &&
+        (value == '.' || ['+', '*', '/', '^', ')', '!'].contains(value))) {
       return false;
     }
 
-    // Check if the character after an operator, dot, or left parenthesis is a digit or left parenthesis
-    if (_result.isNotEmpty && (['+', '-', '*', '/', '^', '(', '.'].contains(_result[_result.length - 1]) || _result[_result.length - 1] == '(') && !['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '(', '-', '√'].contains(value)) {
+    if (_result.isNotEmpty &&
+        (['+', '-', '*', '/', '^', '(', '.'].contains(_result[_result.length - 1]) ||
+            _result[_result.length - 1] == '(') &&
+        !['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '(', '-', '√']
+            .contains(value)) {
       return false;
     }
 
-    // Check if the character after a right parenthesis is a digit, left parenthesis, operator, or dot
-    if (_result.isNotEmpty && _result[_result.length - 1] == ')' && !['+', '-', '*', '/', '^', '(', ')', '.'].contains(value)) {
+    if (_result.isNotEmpty &&
+        _result[_result.length - 1] == ')' &&
+        !['+', '-', '*', '/', '^', '(', ')', '.', '!'].contains(value)) {
       return false;
     }
 
-    // Check if there are more right parentheses than left parentheses + operators after a left parenthesis
     final leftParenthesesCount = _result.split('(').length - 1;
     final rightParenthesesCount = _result.split(')').length - 1;
     if (rightParenthesesCount > leftParenthesesCount) {
       return false;
     }
 
-    // Check if the input is a right parenthesis and there are no matching left parentheses
-    if (value == ')' && _result.split('(').length <= _result.split(')').length) {
+    if (value == ')' &&
+        _result.split('(').length <= _result.split(')').length) {
       return false;
     }
 
-    // Check if there is a left parenthesis after a right parenthesis
-    if (value == '(' && _result.isNotEmpty && _result[_result.length - 1] == ')') {
+    if (value == '(' &&
+        _result.isNotEmpty &&
+        _result[_result.length - 1] == ')') {
       return false;
     }
 
-    // Check if there is a digit before a left parenthesis
-    if (value == '(' && _result.isNotEmpty && RegExp(r'\d').hasMatch(_result[_result.length - 1])) {
+    if (value == '(' &&
+        _result.isNotEmpty &&
+        RegExp(r'\d').hasMatch(_result[_result.length - 1])) {
       return false;
     }
 
-    // Check if there is a digit after a right parenthesis
-    if (RegExp(r'\d').hasMatch(value) && _result.isNotEmpty && _result[_result.length - 1] == ')') {
+    if (RegExp(r'\d').hasMatch(value) &&
+        _result.isNotEmpty &&
+        _result[_result.length - 1] == ')') {
       return false;
     }
-    
-    // Check if the input is a negative sign and can be placed at the beginning or after an opening parenthesis
-    if (value == '-' && (_result.isEmpty || _result[_result.length - 1] == '(')) {
+
+    if (value == '-' &&
+        (_result.isEmpty || _result[_result.length - 1] == '(')) {
       return true;
     }
 
@@ -378,7 +604,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   Color _getButtonColor(String value) {
     // Оранжевые кнопки для операций
-    if (['+', '-', '*', '/', '^', '=', '√'].contains(value)) {
+    if (['+', '-', '*', '/', '^', '!', '=', '√'].contains(value)) {
       return Color(0xFFFF9500);
     }
     // Серые кнопки для функций
@@ -446,80 +672,90 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         onKeyEvent: _handleKeyEvent,
         autofocus: true,
         child: SafeArea(
-          child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                alignment: Alignment.bottomRight,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  reverse: true,
-                  child: Text(
-                    _result.isEmpty ? '0' : _result.toString(),
-                    style: TextStyle(
-                      fontSize: 56,
-                      fontWeight: FontWeight.w300,
-                      color: Colors.white,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 420),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      height: 100,
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                      alignment: Alignment.bottomRight,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        reverse: true,
+                        child: Text(
+                          _result.isEmpty ? '0' : _result.toString(),
+                          style: TextStyle(
+                            fontSize: 56,
+                            fontWeight: FontWeight.w300,
+                            color: Colors.white,
+                          ),
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
                     ),
-                    textAlign: TextAlign.right,
-                  ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              _buildCalculatorButton('C'),
+                              _buildCalculatorButton('('),
+                              _buildCalculatorButton(')'),
+                              _buildCalculatorButton('⌫'),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              _buildCalculatorButton('7'),
+                              _buildCalculatorButton('8'),
+                              _buildCalculatorButton('9'),
+                              _buildCalculatorButton('+'),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              _buildCalculatorButton('4'),
+                              _buildCalculatorButton('5'),
+                              _buildCalculatorButton('6'),
+                              _buildCalculatorButton('-'),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              _buildCalculatorButton('1'),
+                              _buildCalculatorButton('2'),
+                              _buildCalculatorButton('3'),
+                              _buildCalculatorButton('*'),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              _buildCalculatorButton('0', isDoubleWidth: true),
+                              _buildCalculatorButton('.'),
+                              _buildCalculatorButton('!'),
+                              _buildCalculatorButton('='),
+                              _buildCalculatorButton('/'),
+                              _buildCalculatorButton('^'),
+                              _buildCalculatorButton('√'),
+                            ],
+                          ),
+                          SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      _buildCalculatorButton('C'),
-                      _buildCalculatorButton('('),
-                      _buildCalculatorButton(')'),
-                      _buildCalculatorButton('⌫'),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      _buildCalculatorButton('7'),
-                      _buildCalculatorButton('8'),
-                      _buildCalculatorButton('9'),
-                      _buildCalculatorButton('+'),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      _buildCalculatorButton('4'),
-                      _buildCalculatorButton('5'),
-                      _buildCalculatorButton('6'),
-                      _buildCalculatorButton('-'),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      _buildCalculatorButton('1'),
-                      _buildCalculatorButton('2'),
-                      _buildCalculatorButton('3'),
-                      _buildCalculatorButton('*'),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      _buildCalculatorButton('0', isDoubleWidth: true),
-                      _buildCalculatorButton('.'),
-                      _buildCalculatorButton('='),
-                      _buildCalculatorButton('/'),
-                      _buildCalculatorButton('^'),
-                      _buildCalculatorButton('√'),
-                    ],
-                  ),
-                  SizedBox(height: 8),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
         ),
       ),
     );
